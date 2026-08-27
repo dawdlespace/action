@@ -1,0 +1,70 @@
+name: Upload to dawdle.space
+description: Upload a directory to dawdle.space
+
+branding:
+  icon: upload-cloud
+  color: purple
+
+inputs:
+  site-id:
+    description: Dawdle site ID
+    required: true
+  api-key:
+    description: Dawdle site API key
+    required: true
+  path:
+    description: Directory to upload
+    required: true
+  replace:
+    description: Replace the site instead of merging files
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Package and upload site
+      shell: bash
+      env:
+        DAWDLE_API_KEY: ${{ inputs.api-key }}
+        DAWDLE_PATH: ${{ inputs.path }}
+        DAWDLE_REPLACE: ${{ inputs.replace }}
+        DAWDLE_SITE_ID: ${{ inputs.site-id }}
+      run: |
+        set -euo pipefail
+
+        if [[ -z "$DAWDLE_API_KEY" ]]; then
+          echo "api-key is required" >&2
+          exit 1
+        fi
+        echo "::add-mask::$DAWDLE_API_KEY"
+
+        if [[ -z "$DAWDLE_SITE_ID" ]]; then
+          echo "site-id is required" >&2
+          exit 1
+        fi
+
+        if [[ ! -d "$DAWDLE_PATH" ]]; then
+          echo "Directory does not exist: $DAWDLE_PATH" >&2
+          exit 1
+        fi
+
+        if [[ "$DAWDLE_REPLACE" != "true" && "$DAWDLE_REPLACE" != "false" ]]; then
+          echo "replace must be true or false" >&2
+          exit 1
+        fi
+
+        archive="$(mktemp "${RUNNER_TEMP:-/tmp}/dawdle.XXXXXX")"
+        trap 'rm -f "$archive"' EXIT
+
+        echo "Preparing $DAWDLE_PATH for upload"
+        tar -czf "$archive" -C "$DAWDLE_PATH" .
+
+        echo "Uploading to Dawdle site $DAWDLE_SITE_ID"
+        curl --fail-with-body --silent --show-error \
+          --request POST \
+          --url "https://dawdle.space/api/upload?siteId=${DAWDLE_SITE_ID}&replace=${DAWDLE_REPLACE}" \
+          --header "Authorization: Bearer ${DAWDLE_API_KEY}" \
+          --header "Content-Type: application/gzip" \
+          --data-binary "@${archive}"
+        printf '\nUpload complete\n'
